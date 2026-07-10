@@ -16,6 +16,8 @@ import {Geoid} from '@math.gl/geoid';
 
 import {PGMLoader} from '../pgm-loader';
 import {i3sObbTo3dTilesObb} from './helpers/i3s-obb-to-3d-tiles-obb';
+import {createProjection, type Projection} from './helpers/projection';
+import {GeoTiffGeoidModel} from './helpers/geotiff-geoid-model';
 import {convertScreenThresholdToGeometricError} from '../lib/utils/lod-conversion-utils';
 import {writeFile, removeDir} from '../lib/utils/file-utils';
 import {calculateDatasetSize, timeConverter} from '../lib/utils/statistic-utils';
@@ -46,6 +48,8 @@ export default class Tiles3DConverter {
   vertexCounter: number;
   conversionStartTime: [number, number];
   geoidHeightModel: Geoid | null;
+  /** Reprojection for local-mode (projected CRS) I3S stores; null for global-mode WGS84. */
+  projection: Projection | null = null;
   sourceTileset: I3STilesetHeader | null;
   attributeStorageInfo?: AttributeStorageInfo[] | null;
   workerSource: {[key: string]: string} = {};
@@ -121,7 +125,17 @@ export default class Tiles3DConverter {
     this.fileExt = this.options.outputVersion === '1.0' ? 'b3dm' : 'glb';
 
     console.log('Loading egm file...'); // eslint-disable-line
-    this.geoidHeightModel = await load(egmFilePath, PGMLoader);
+    // "None" disables the geoid (heights are treated as already ellipsoidal).
+    // A GeoTIFF grid (e.g. the survey-grade German quasigeoid GCG2016,
+    // de_bkg_gcg2016.tif) is read via GeoTiffGeoidModel; a .pgm (EGM*) via the
+    // built-in PGMLoader. All expose getHeight(lat, lon) -> undulation N (metres).
+    if (egmFilePath === 'None') {
+      this.geoidHeightModel = {getHeight: () => 0} as unknown as Geoid;
+    } else if (/\.tiff?$/i.test(egmFilePath)) {
+      this.geoidHeightModel = (await GeoTiffGeoidModel.fromFile(egmFilePath)) as unknown as Geoid;
+    } else {
+      this.geoidHeightModel = await load(egmFilePath, PGMLoader);
+    }
     console.log('Loading egm file completed!'); // eslint-disable-line
 
     this.slpkFilesystem = await openSLPK(inputUrl);
@@ -150,6 +164,13 @@ export default class Tiles3DConverter {
     if (!this.sourceTileset) {
       return undefined;
     }
+
+    // Local-mode I3S stores use a projected index/vertex CRS (e.g. EPSG:25832) and
+    // must be reprojected to WGS84. Global-mode (4326/4490) stores => null (unchanged path).
+    this.projection = createProjection(
+      // @ts-expect-error spatialReference is present on the layer JSON
+      this.sourceTileset.spatialReference ?? this.sourceTileset.store?.spatialReference
+    );
 
     const rootNode = this.sourceTileset?.root;
     if (!rootNode.obb) {
@@ -184,7 +205,7 @@ export default class Tiles3DConverter {
 
     const rootTile: Tiles3DTileJSON = {
       boundingVolume: {
-        box: i3sObbTo3dTilesObb(rootNode.obb, this.geoidHeightModel)
+        box: i3sObbTo3dTilesObb(rootNode.obb, this.geoidHeightModel, this.projection)
       },
       geometricError: convertScreenThresholdToGeometricError(rootNode),
       children: [],
@@ -296,7 +317,10 @@ export default class Tiles3DConverter {
       const i3sAttributesData: I3SAttributesData = {
         tileContent: content,
         box: boundingVolume.box || [],
-        textureFormat: sourceChild.textureFormat
+        textureFormat: sourceChild.textureFormat,
+        projection: this.projection,
+        sourceObbCenter: sourceChild.obb?.center,
+        geoidHeightModel: this.geoidHeightModel
       };
 
       const converter = new Tiles3DContentConverter({outputVersion: this.options.outputVersion});
@@ -400,7 +424,7 @@ export default class Tiles3DConverter {
       sourceChild.obb = createObbFromMbs(sourceChild.mbs);
     }
     const boundingVolume: Tile3DBoundingVolume = {
-      box: i3sObbTo3dTilesObb(sourceChild.obb, this.geoidHeightModel)
+      box: i3sObbTo3dTilesObb(sourceChild.obb, this.geoidHeightModel, this.projection)
     };
     const child: Tiles3DTileJSON = {
       boundingVolume,

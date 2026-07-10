@@ -13,6 +13,9 @@ import {isTypedArray} from '@math.gl/types';
 import {Ellipsoid} from '@math.gl/geospatial';
 import {convertTextureAtlas} from './texture-atlas';
 import {generateSyntheticIndices} from '../../lib/utils/geometry-utils';
+import type {Projection} from './projection';
+// @ts-expect-error
+import {GeoidHeightModel} from '@loaders.gl/tile-converter/lib/geoid-height-model';
 
 const Z_UP_TO_Y_UP_MATRIX = new Matrix4([1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1]);
 const scratchVector = new Vector3();
@@ -24,6 +27,12 @@ export type I3SAttributesData = {
   tileContent: I3STileContent;
   box: number[];
   textureFormat: string;
+  /** Optional reprojection for local-mode (projected CRS) I3S. Null/absent => WGS84 store, unchanged path. */
+  projection?: Projection | null;
+  /** Source node OBB center in the store's (projected) CRS — the origin that vertex offsets are relative to. Required when `projection` is set. */
+  sourceObbCenter?: number[];
+  /** Earth Gravity / geoid model to convert gravity-related heights to ellipsoidal. Used with `projection`. */
+  geoidHeightModel?: GeoidHeightModel | null;
 };
 
 /**
@@ -78,7 +87,8 @@ export class Tiles3DContentConverter {
     featureAttributes: I3STileAttributes | null,
     attributeStorageInfo?: AttributeStorageInfo[] | null | undefined
   ): Promise<ArrayBuffer> {
-    const {tileContent, textureFormat, box} = i3sAttributesData;
+    const {tileContent, textureFormat, box, projection, sourceObbCenter, geoidHeightModel} =
+      i3sAttributesData;
     const {material, attributes, indices: originalIndices, modelMatrix} = tileContent;
     const gltfBuilder = new GLTFScenegraph();
 
@@ -118,11 +128,15 @@ export class Tiles3DContentConverter {
       new Vector3()
     );
 
+    const reprojection = projection
+      ? {projection, sourceObbCenter, geoidHeightModel: geoidHeightModel ?? null}
+      : null;
     attributes.positions.value = this._normalizePositions(
       positionsValue,
       cartesianOrigin,
       cartographicOrigin,
-      modelMatrix
+      modelMatrix,
+      reprojection
     );
 
     this._createBatchIds(tileContent, featureAttributes);
@@ -296,16 +310,45 @@ export class Tiles3DContentConverter {
    * @param {number[]} cartesianOrigin - the tile center in the cartesian coordinate system
    * @param {number[]} cartographicOrigin - the tile center in the cartographic coordinate system
    * @param {number[]} modelMatrix - the model matrix of geometry
+   * @param reprojection - optional reprojection for local-mode (projected CRS) I3S:
+   *   the source-CRS `projection`, the source node OBB center (`sourceObbCenter`,
+   *   the origin that vertex offsets are relative to) and a `geoidHeightModel` for
+   *   gravity-related -> ellipsoidal height. Null for global-mode WGS84 stores
+   *   (offsets are added to the cartographic origin unchanged).
    * @returns {Float32Array} - the output geometry positions array
    */
-  _normalizePositions(positionsValue, cartesianOrigin, cartographicOrigin, modelMatrix) {
+  _normalizePositions(
+    positionsValue,
+    cartesianOrigin,
+    cartographicOrigin,
+    modelMatrix,
+    reprojection: {
+      projection: Projection;
+      sourceObbCenter?: number[];
+      geoidHeightModel: GeoidHeightModel | null;
+    } | null = null
+  ) {
     const newPositionsValue = new Float32Array(positionsValue.length);
+    const cartesianOriginVector = new Vector3(cartesianOrigin);
     for (let index = 0; index < positionsValue.length; index += 3) {
       const vertex = positionsValue.subarray(index, index + 3);
-      const cartesianOriginVector = new Vector3(cartesianOrigin);
-      let vertexVector = new Vector3(Array.from(vertex))
-        .transform(modelMatrix)
-        .add(cartographicOrigin);
+      let vertexVector = new Vector3(Array.from(vertex)).transform(modelMatrix);
+      if (reprojection?.projection && reprojection.sourceObbCenter) {
+        // Local-mode (projected CRS) I3S: `vertexVector` is a metric offset in the
+        // source CRS relative to the node origin. Reconstruct absolute projected
+        // coordinates, reproject horizontally to WGS84 lon/lat, and add the geoid
+        // undulation to turn the gravity-related height into an ellipsoidal height.
+        const {projection, sourceObbCenter, geoidHeightModel} = reprojection;
+        const absX = sourceObbCenter[0] + vertexVector[0];
+        const absY = sourceObbCenter[1] + vertexVector[1];
+        const absZ = sourceObbCenter[2] + vertexVector[2];
+        const [lon, lat] = projection.forward([absX, absY]);
+        const height = absZ + (geoidHeightModel ? geoidHeightModel.getHeight(lat, lon) : 0);
+        vertexVector = new Vector3(lon, lat, height);
+      } else {
+        // Global-mode (WGS84) I3S: offsets are lng/lat/height offsets from the origin.
+        vertexVector = vertexVector.add(cartographicOrigin);
+      }
       Ellipsoid.WGS84.cartographicToCartesian(vertexVector, scratchVector);
       vertexVector = scratchVector.subtract(cartesianOriginVector);
       newPositionsValue.set(vertexVector, index);
