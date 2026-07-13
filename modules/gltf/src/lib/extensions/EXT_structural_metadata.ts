@@ -770,13 +770,13 @@ function encodeProperties(
  * @param scenegraph - Instance of the class for structured access to GLTF data.
  * @param propertyAttributes - property attributes
  * @param classId - classId to use for encoding metadata.
- * @returns Index of the table created.
+ * @returns Index of the created property table, or undefined when there are no rows to encode.
  */
 export function createExtStructuralMetadata(
   scenegraph: GLTFScenegraph,
   propertyAttributes: PropertyAttribute[],
   classId: string = SCHEMA_CLASS_ID_DEFAULT
-): number {
+): number | undefined {
   let extension: GLTF_EXT_structural_metadata_GLTF | null = scenegraph.getExtension(
     EXT_STRUCTURAL_METADATA_NAME
   );
@@ -784,7 +784,15 @@ export function createExtStructuralMetadata(
     extension = scenegraph.addExtension(EXT_STRUCTURAL_METADATA_NAME);
   }
 
+  // Always emit the schema; createSchema omits the class for attribute-less input
   extension.schema = createSchema(propertyAttributes, classId, extension.schema);
+
+  // A property table's count must be >= 1, so with no rows emit no table
+  const rowCount = propertyAttributes[0]?.values?.length ?? 0;
+  if (rowCount === 0) {
+    return undefined;
+  }
+
   const table = createPropertyTable(propertyAttributes, classId, extension.schema);
   if (!extension.propertyTables) {
     extension.propertyTables = [];
@@ -812,8 +820,10 @@ function createSchema(
     schemaClass.properties[attribute.name] = classProperty;
   }
 
-  schema.classes = {};
-  schema.classes[classId] = schemaClass;
+  // A class must declare at least one property, so only register it when it has some
+  if (Object.keys(schemaClass.properties).length > 0) {
+    schema.classes = {...schema.classes, [classId]: schemaClass};
+  }
   return schema;
 }
 
