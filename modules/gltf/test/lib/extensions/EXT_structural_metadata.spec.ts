@@ -301,6 +301,36 @@ test('gltf#EXT_structural_metadata - Should encode', async t => {
   t.end();
 });
 
+test('gltf#EXT_structural_metadata - Valid (class-less) schema, no count:0 table for empty / zero-row attributes', t => {
+  // Attribute-less input still emits the extension + schema, but no class and no count:0 table
+  const emptyScenegraph = new GLTFScenegraph();
+  const emptyIndex = createExtStructuralMetadata(emptyScenegraph, []);
+  const emptyExt = emptyScenegraph.gltf.json.extensions?.EXT_structural_metadata;
+  t.equal(emptyIndex, undefined, 'returns undefined when there are no property attributes');
+  t.ok(
+    emptyExt,
+    'the EXT_structural_metadata extension is still created (extensions stays non-empty)'
+  );
+  t.notOk(
+    emptyExt?.schema?.classes,
+    'no class is declared (an empty class / properties {} is invalid)'
+  );
+  t.notOk(emptyExt?.propertyTables, 'no property table is created (a count:0 table is invalid)');
+
+  // Attributes present but zero rows: a class may be declared, but still no count:0 table.
+  const zeroRowScenegraph = new GLTFScenegraph();
+  const zeroRowIndex = createExtStructuralMetadata(zeroRowScenegraph, [
+    {name: 'OBJECTID', elementType: 'SCALAR', componentType: 'UINT32', values: []}
+  ]);
+  t.equal(zeroRowIndex, undefined, 'returns undefined when the property attributes have zero rows');
+  t.notOk(
+    zeroRowScenegraph.gltf.json.extensions?.EXT_structural_metadata?.propertyTables,
+    'no property table is created for zero-row attributes'
+  );
+
+  t.end();
+});
+
 test('gltf#EXT_structural_metadata - Roundtrip encoding/decoding', async t => {
   const scenegraph = new GLTFScenegraph();
   createExtStructuralMetadata(scenegraph, ATTRIBUTES);
