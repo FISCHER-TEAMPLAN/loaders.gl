@@ -167,10 +167,7 @@ async function loadFeatureAttributeData(
   }
 
   const arrayBuffer = await response.arrayBuffer();
-  const objectIdAttributeData = parseI3STileAttribute(arrayBuffer, {
-    attributeName,
-    attributeType
-  });
+  const objectIdAttributeData = parseI3STileAttribute(arrayBuffer, attributeName, attributeType);
 
   return objectIdAttributeData;
 }

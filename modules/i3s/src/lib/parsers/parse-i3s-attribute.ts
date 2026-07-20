@@ -17,12 +17,15 @@ export type I3STileAttributes = Record<string, Attribute>;
 /**
  * Get particular tile and creates attribute object inside.
  * @param  arrayBuffer
- * @param {Object} options
+ * @param attributeName
+ * @param attributeType
  * @returns {Promise<object>}
  */
-export function parseI3STileAttribute(arrayBuffer: ArrayBuffer, options): I3STileAttributes {
-  const {attributeName, attributeType} = options;
-
+export function parseI3STileAttribute(
+  arrayBuffer: ArrayBuffer,
+  attributeName?: string,
+  attributeType?: string
+): I3STileAttributes {
   if (!attributeName) {
     return {};
   }

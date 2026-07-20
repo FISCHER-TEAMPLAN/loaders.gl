@@ -18,7 +18,15 @@ const REJECTED_STATUS = 'rejected';
 export const I3SAttributeLoaderWithParser = {
   ...I3SAttributeLoaderMetadataWithoutPreload,
   parse: async (arrayBuffer: ArrayBuffer, options?: LoaderOptions) =>
-    parseI3STileAttribute(arrayBuffer, options)
+    parseI3STileAttribute(
+      arrayBuffer,
+      // Prefer the documented `options.i3s` namespace; fall back to the deprecated
+      // flat top-level shape for backward compatibility (pre-#3112 callers).
+      (options as I3SLoaderOptions)?.i3s?.attributeName ??
+        (options as {attributeName?: string})?.attributeName,
+      (options as I3SLoaderOptions)?.i3s?.attributeType ??
+        (options as {attributeType?: string})?.attributeType
+    )
 } as const satisfies LoaderWithParser<I3STileAttributes, never, I3SLoaderOptions>;
 
 // TODO - these seem to use the loader rather than being part of the loader. Move to different file...
@@ -46,8 +54,7 @@ export async function loadFeatureAttributes(tile, featureId, options = {}) {
     const url = getUrlWithToken(attributeUrls[index], options.i3s?.token);
     const attributeName = attributeStorageInfo[index].name;
     const attributeType = getAttributeValueType(attributeStorageInfo[index]);
-    const loadOptions = {...options, attributeName, attributeType};
-    const promise = loadAttribute(url, loadOptions);
+    const promise = loadAttribute(url, options, attributeName, attributeType);
 
     attributeLoadPromises.push(promise);
   }
@@ -64,10 +71,15 @@ export async function loadFeatureAttributes(tile, featureId, options = {}) {
   return generateAttributesByFeatureId(attributes, attributeStorageInfo, featureId, tilesetFields);
 }
 
-async function loadAttribute(url: string, options: LoaderOptions): Promise<I3STileAttributes> {
+async function loadAttribute(
+  url: string,
+  options: LoaderOptions,
+  attributeName: string,
+  attributeType: string
+): Promise<I3STileAttributes> {
   const response = await fetchAttribute(url, options.fetch);
   const arrayBuffer = await response.arrayBuffer();
-  return parseI3STileAttribute(arrayBuffer, options);
+  return parseI3STileAttribute(arrayBuffer, attributeName, attributeType);
 }
 
 async function fetchAttribute(

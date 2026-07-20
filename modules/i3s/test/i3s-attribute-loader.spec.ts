@@ -148,7 +148,7 @@ const TILE_WITH_INT_16_ATTRIBUTES = {
 
 test('I3SAttributeLoader# should return empty object if no attributeName provided', async t => {
   const options = {
-    attributeType: 'Oid32'
+    i3s: {attributeType: 'Oid32'}
   };
   const attributes = await load(objectIdsUrl, I3SAttributeLoader, options);
   t.ok(attributes);
@@ -158,7 +158,7 @@ test('I3SAttributeLoader# should return empty object if no attributeName provide
 
 test('I3SAttributeLoader# should return empty object if no attributeType provided', async t => {
   const options = {
-    attributeName: 'OBJECTID'
+    i3s: {attributeName: 'OBJECTID'}
   };
   const attributes = await load(objectIdsUrl, I3SAttributeLoader, options);
   t.ok(attributes);
@@ -175,8 +175,7 @@ test('I3SAttributeLoader# should return empty object if no attributeName and att
 
 test('I3SAttributeLoader# should load OBJECTID attribute', async t => {
   const options = {
-    attributeName: 'OBJECTID',
-    attributeType: 'Oid32'
+    i3s: {attributeName: 'OBJECTID', attributeType: 'Oid32'}
   };
   const attributes = await load(objectIdsUrl, I3SAttributeLoader, options);
   t.ok(attributes);
@@ -185,10 +184,21 @@ test('I3SAttributeLoader# should load OBJECTID attribute', async t => {
   t.end();
 });
 
+test('I3SAttributeLoader# should still accept deprecated flat top-level options', async t => {
+  // Backward-compat: pre-#3112 callers passed attributeName/attributeType at the top level.
+  const options = {
+    attributeName: 'OBJECTID',
+    attributeType: 'Oid32'
+  };
+  const attributes = await load(objectIdsUrl, I3SAttributeLoader, options);
+  t.ok(attributes);
+  t.equal(attributes.OBJECTID?.[0], objecId0);
+  t.end();
+});
+
 test('I3SAttributeLoader# should load string attribute', async t => {
   const options = {
-    attributeName: 'NAME',
-    attributeType: 'String'
+    i3s: {attributeName: 'NAME', attributeType: 'String'}
   };
   const attributes = await load(namesUrl, I3SAttributeLoader, options);
   t.ok(attributes);
@@ -199,8 +209,7 @@ test('I3SAttributeLoader# should load string attribute', async t => {
 
 test('I3SAttributeLoader# should load float attribute', async t => {
   const options = {
-    attributeName: 'HEIGHTROOF',
-    attributeType: 'Float64'
+    i3s: {attributeName: 'HEIGHTROOF', attributeType: 'Float64'}
   };
   const attributes = await load(heightRoofUrl, I3SAttributeLoader, options);
   t.ok(attributes);
